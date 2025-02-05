@@ -173,6 +173,7 @@ station_med[ , atm.press_dist := abs(atm.press-medians$atm.press)]
 median_atm.press_station <- station_med[atm.press_dist == 0]
 median_atm.press_station
 ```
+- They do not coincide across all three variables.
 
 Knit the document, commit your changes, and save it on GitHub. Don't forget to add `README.md` to the tree, the first time you render it.
 
@@ -206,9 +207,47 @@ Knit the doc and save it on GitHub.
 For each state, identify what is the station that is closest to the mid-point of the state. Combining these with the stations you identified in the previous question, use `leaflet()` to visualize all ~100 points in the same figure, applying different colors for those identified in this question.
 
 ```{r}
+library(data.table)
+
+# Compute midpoints for each state
+mid_point <- met[, .(
+  lon_50 = quantile(lon, probs = 0.5, na.rm = TRUE),
+  lat_50 = quantile(lat, probs = 0.5, na.rm = TRUE)
+), by = STATE]
+
+# Merge midpoints into the original dataset for distance calculation
+met <- merge(met, mid_point, by = "STATE")
+
+# Compute Euclidean distance from each station to the state midpoint
+met[, distance := sqrt((lon - lon_50)^2 + (lat - lat_50)^2)]
+
+# Find the closest station per state
+met_closest <- met[, .SD[which.min(distance)], by = STATE]
 
 ```
 
+```{r}
+mid <- merge(met_closest, mid_point, by = "STATE")
+
+library(leaflet)
+leaflet() %>%
+  addProviderTiles('CartoDB.Positron') %>%
+
+  # Add geographic midpoints (blue)
+  addCircles(
+    data = mid_point,  
+    lat = ~lat_50, lng = ~lon_50, popup = "Geographic Midpoint",
+    opacity = 1, fillOpacity = 1, radius = 400, color = "blue"
+  ) %>%
+
+  # Add closest stations to midpoints (magenta)
+  addCircles(
+    data = met_closest,  
+    lat = ~lat, lng = ~lon, popup = "Closest Station to Midpoint",
+    opacity = 1, fillOpacity = 1, radius = 400, color = "magenta"
+  )
+
+```
 Knit the doc and save it on GitHub.
 
 ## Question 4: Means of means
@@ -222,7 +261,17 @@ Start by computing the states' average temperature. Use that measurement to clas
 - High: temp >= 25
 
 ```{r}
+# Compute the average temperature per state
+state_avg <- met[, .(
+  avg_temp = mean(temp, na.rm = TRUE),
+  avg_wind = mean(wind.sp, na.rm = TRUE),
+  avg_pressure = mean(atm.press, na.rm = TRUE),
+  num_stations = .N
+), by = STATE]
 
+# Classify temperature levels
+state_avg[, temp_level := fifelse(avg_temp < 20, "Low",
+                           fifelse(avg_temp >= 20 & avg_temp < 25, "Mid", "High"))]
 ```
 
 Once you are done with that, you can compute the following:
@@ -236,7 +285,29 @@ Once you are done with that, you can compute the following:
 All by the levels described before.
 
 ```{r}
+# Compute summary table by temperature level
+summary_table <- state_avg[, .(
+  num_states = .N,
+  num_entries = sum(num_stations),
+  mean_temp = mean(avg_temp, na.rm = TRUE),
+  mean_wind = mean(avg_wind, na.rm = TRUE),
+  mean_pressure = mean(avg_pressure, na.rm = TRUE),
+  total_stations = sum(num_stations, na.rm = TRUE)
+), by = .(STATE, temp_level)]
 
+# Compute number of NA entries per level
+na_entries <- met[, .(
+  num_NA_temp = sum(is.na(temp)),
+  num_NA_wind = sum(is.na(wind.sp)),
+  num_NA_pressure = sum(is.na(atm.press))
+), by = STATE][, .(total_NA = sum(num_NA_temp + num_NA_wind + num_NA_pressure)), by = STATE]
+
+# Merge NA counts with summary table
+summary_table <- merge(summary_table, na_entries, by = "STATE", all.x = TRUE)
+
+# Display final table
+library(knitr)
+kable(summary_table, caption = "Summary Table by Temperature Level")
 ```
 
 Knit the document, commit your changes, and push them to GitHub. 
@@ -251,5 +322,41 @@ Let's practice running regression models with smooth functions on X. We need the
 - fit both a linear model and a spline model (use `gam()` with a cubic regression spline on wind speed). Summarize and plot the results from the models and interpret which model is the best fit and why.
 
 ```{r}
+library(ggplot2)
+station_med <- met[, .(
+  median_temp = median(temp, na.rm = TRUE),
+  median_wind = median(wind.sp, na.rm = TRUE)
+), by = .(USAFID, STATE)]
 
+# Create a scatterplot of the two variables using ggplot2. Add both a linear regression line and a smooth line
+ggplot(station_med, aes(x = median_wind, y = median_temp)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "blue", se = FALSE) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs"), color = "red", se = FALSE) + 
+  labs(title = "Median Temperature vs. Median Wind Speed",
+       x = "Median Wind Speed",
+       y = "Median Temperature") +
+  theme_minimal()
 ```
+
+```{r}
+# fit both a linear model
+lm_model <- lm(median_temp ~ median_wind, data = station_med)
+summary(lm_model)
+```
+
+
+```{r}
+library(mgcv)
+# Fit a spline model (use `gam()` with a cubic regression spline on wind speed)
+gam_model <- gam(median_temp ~ s(median_wind, bs = "cs"), data = station_med)
+summary(gam_model)
+```
+
+```{r}
+# Plot GAM Model
+plot(gam_model, pages = 1, shade = TRUE, col = "red")
+```
+
+- GAM model will be better. It can capture non-linear property in the data. Meanwhile, the R-squared value of GAM is larger than linear model.
+
