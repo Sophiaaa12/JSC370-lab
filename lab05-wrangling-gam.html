@@ -574,6 +574,22 @@ the most representative, the median, station per state. This time,
 instead of looking at one variable at a time, look at the euclidean
 distance. If multiple stations show in the median, select the one
 located at the lowest latitude.</p>
+<pre class="r"><code># Median per state
+station_med[, temp_50 := quantile(temp, probs= .5, na.rm = TRUE), by = STATE]
+station_med[, wind.sp_50 := quantile(wind.sp, probs = .5, na.rm = TRUE), by = STATE]
+# distance
+station_med[,eudist := sqrt(
+  (temp-temp_50)^2 + (wind.sp-wind.sp_50)^2
+)]
+
+# choose the most representative, the median, station per state with the lowest distance
+id_station &lt;- station_med[ , .SD[which.min(eudist)], by = STATE]
+
+id_station &lt;- merge(
+  x = id_station, y = stations,
+  by.x = &quot;USAFID&quot;, by.y= &quot;USAF&quot;,
+  all.x = TRUE, all.y = FALSE
+)</code></pre>
 <p>Knit the doc and save it on GitHub.</p>
 </div>
 <div id="question-3-in-the-middle" class="section level2">
